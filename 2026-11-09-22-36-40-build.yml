@@ -1,0 +1,868 @@
+name: Build Launcher APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create project files
+        run: |
+          mkdir -p 'app'
+          cat > 'app/build.gradle.kts' <<'EOF_0'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.nasiriyah.launcher"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.nasiriyah.launcher"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF_0
+          mkdir -p 'app/src/main'
+          cat > 'app/src/main/AndroidManifest.xml' <<'EOF_1'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
+
+              <application
+                  android:allowBackup="false"
+                  android:icon="@drawable/ic_launcher"
+                  android:label="لانشر الناصرية"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:resumeWhilePausing="true"
+                      android:screenOrientation="portrait"
+                      android:stateNotNeeded="true"
+                      android:windowSoftInputMode="adjustPan">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.HOME" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF_1
+          mkdir -p 'app/src/main/java/com/nasiriyah/launcher'
+          cat > 'app/src/main/java/com/nasiriyah/launcher/MainActivity.kt' <<'EOF_2'
+          package com.nasiriyah.launcher
+
+          import android.app.Activity
+          import android.content.ComponentName
+          import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.ColorDrawable
+          import android.graphics.drawable.Drawable
+          import android.graphics.drawable.GradientDrawable
+          import android.graphics.drawable.LayerDrawable
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.MediaStore
+          import android.text.Editable
+          import android.text.TextUtils
+          import android.text.TextWatcher
+          import android.view.Gravity
+          import android.view.GestureDetector
+          import android.view.MotionEvent
+          import android.view.View
+          import android.view.ViewGroup
+          import android.view.inputmethod.InputMethodManager
+          import android.widget.BaseAdapter
+          import android.widget.EditText
+          import android.widget.FrameLayout
+          import android.widget.GridView
+          import android.widget.ImageView
+          import android.widget.LinearLayout
+          import android.widget.TextClock
+          import android.widget.TextView
+          import android.widget.Toast
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.text.SimpleDateFormat
+          import java.time.LocalDate
+          import java.time.chrono.HijrahDate
+          import java.time.temporal.ChronoField
+          import java.util.Calendar
+          import java.util.Date
+          import java.util.Locale
+          import kotlin.concurrent.thread
+          import kotlin.math.abs
+          import kotlin.math.acos
+          import kotlin.math.asin
+          import kotlin.math.atan2
+          import kotlin.math.cos
+          import kotlin.math.floor
+          import kotlin.math.roundToInt
+          import kotlin.math.sin
+
+          class AppItem(val label: String, val pkg: String, val component: ComponentName, val icon: Drawable)
+
+          class MainActivity : Activity() {
+
+              private val accent = 0xFFFFB547.toInt()
+              private val white = 0xFFF2F4F7.toInt()
+              private val dim = 0xFF9AA3B2.toInt()
+              private val soft = 0xFFB4BCC9.toInt()
+              private val match = ViewGroup.LayoutParams.MATCH_PARENT
+              private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+
+              private lateinit var root: FrameLayout
+              private lateinit var homeGrid: LinearLayout
+              private lateinit var drawer: FrameLayout
+              private lateinit var drawerGrid: GridView
+              private lateinit var searchBox: EditText
+              private lateinit var adapter: AppAdapter
+              private lateinit var dateView: TextView
+              private lateinit var hijriView: TextView
+              private lateinit var tempView: TextView
+              private lateinit var condView: TextView
+              private lateinit var prayerName: TextView
+              private lateinit var prayerTime: TextView
+
+              private var apps: List<AppItem> = emptyList()
+              private var lastWeather = 0L
+
+              private val tick = object : Runnable {
+                  override fun run() {
+                      updateDates()
+                      updatePrayer()
+                      root.postDelayed(this, 60000)
+                  }
+              }
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun glass(r: Int, fill: Int = 0x14FFFFFF): GradientDrawable {
+                  return GradientDrawable().apply {
+                      setColor(fill)
+                      cornerRadius = dp(r).toFloat()
+                      setStroke(dp(1), 0x28FFFFFF)
+                  }
+              }
+
+              private fun radial(c: Int, cx: Float, cy: Float): GradientDrawable {
+                  return GradientDrawable().apply {
+                      gradientType = GradientDrawable.RADIAL_GRADIENT
+                      gradientRadius = dp(420).toFloat()
+                      setGradientCenter(cx, cy)
+                      colors = intArrayOf(c, c and 0x00FFFFFF)
+                  }
+              }
+
+              private fun label(text: String, size: Float, color: Int, bold: Boolean = false): TextView {
+                  val t = TextView(this)
+                  t.text = text
+                  t.textSize = size
+                  t.setTextColor(color)
+                  if (bold) t.typeface = Typeface.DEFAULT_BOLD
+                  return t
+              }
+
+              private fun statusBarH(): Int {
+                  val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+                  return if (id > 0) resources.getDimensionPixelSize(id) else dp(24)
+              }
+
+              private fun navBarH(): Int {
+                  val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+                  val h = if (id > 0) resources.getDimensionPixelSize(id) else 0
+                  return minOf(h, dp(48))
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.statusBarColor = Color.TRANSPARENT
+                  window.navigationBarColor = Color.TRANSPARENT
+                  @Suppress("DEPRECATION")
+                  window.decorView.systemUiVisibility =
+                      View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                          View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                          View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                  buildUi()
+                  setContentView(root)
+              }
+
+              private fun buildUi() {
+                  root = FrameLayout(this)
+                  root.layoutDirection = View.LAYOUT_DIRECTION_RTL
+                  root.background = LayerDrawable(
+                      arrayOf<Drawable>(
+                          ColorDrawable(0xFF0D1015.toInt()),
+                          radial(0x38FFB547, 0f, 0.08f),
+                          radial(0x486366F1, 1f, 0.4f),
+                          radial(0x282DD4BF, 0.15f, 0.8f)
+                      )
+                  )
+
+                  val page = LinearLayout(this)
+                  page.orientation = LinearLayout.VERTICAL
+                  page.setPadding(dp(20), statusBarH() + dp(16), dp(20), navBarH() + dp(8))
+                  root.addView(page, FrameLayout.LayoutParams(match, match))
+
+                  // الساعة + الطقس
+                  val top = LinearLayout(this)
+                  top.orientation = LinearLayout.HORIZONTAL
+                  top.gravity = Gravity.CENTER_VERTICAL
+
+                  val clockCol = LinearLayout(this)
+                  clockCol.orientation = LinearLayout.VERTICAL
+                  val clock = TextClock(this)
+                  clock.format12Hour = "h:mm"
+                  clock.format24Hour = "h:mm"
+                  clock.textSize = 68f
+                  clock.setTextColor(white)
+                  clock.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)
+                  clock.textDirection = View.TEXT_DIRECTION_LTR
+                  clock.includeFontPadding = false
+                  clockCol.addView(clock)
+                  dateView = label("", 15f, dim)
+                  clockCol.addView(dateView)
+                  top.addView(clockCol, LinearLayout.LayoutParams(0, wrap, 1f))
+
+                  val wx = LinearLayout(this)
+                  wx.orientation = LinearLayout.VERTICAL
+                  wx.gravity = Gravity.CENTER
+                  wx.background = glass(22)
+                  wx.setPadding(dp(8), dp(10), dp(8), dp(10))
+                  tempView = label("--°", 28f, white, true)
+                  tempView.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD_ITALIC)
+                  condView = label("الناصرية", 12f, soft)
+                  hijriView = label("", 12f, dim)
+                  wx.addView(tempView)
+                  wx.addView(condView)
+                  wx.addView(hijriView)
+                  top.addView(wx, LinearLayout.LayoutParams(dp(150), wrap))
+                  page.addView(top)
+
+                  // الصلاة القادمة
+                  val prayer = LinearLayout(this)
+                  prayer.orientation = LinearLayout.HORIZONTAL
+                  prayer.gravity = Gravity.CENTER_VERTICAL
+                  prayer.background = glass(22)
+                  prayer.setPadding(dp(16), 0, dp(16), 0)
+                  val pLabel = label("الصلاة القادمة", 13f, dim)
+                  prayerName = label("", 15f, white, true)
+                  prayerName.setPadding(dp(10), 0, 0, 0)
+                  prayerTime = label("", 15f, accent, true)
+                  prayerTime.textDirection = View.TEXT_DIRECTION_LTR
+                  prayer.addView(pLabel)
+                  prayer.addView(prayerName)
+                  prayer.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+                  prayer.addView(prayerTime)
+                  val pl = LinearLayout.LayoutParams(match, dp(44))
+                  pl.topMargin = dp(14)
+                  page.addView(prayer, pl)
+
+                  // البحث
+                  val search = label("ابحث في الهاتف", 15f, dim)
+                  search.gravity = Gravity.CENTER_VERTICAL
+                  search.background = glass(24)
+                  search.setPadding(dp(20), 0, dp(20), 0)
+                  search.setOnClickListener { openDrawer() }
+                  val sl = LinearLayout.LayoutParams(match, dp(48))
+                  sl.topMargin = dp(14)
+                  page.addView(search, sl)
+
+                  // شبكة المثبّتة
+                  homeGrid = LinearLayout(this)
+                  homeGrid.orientation = LinearLayout.VERTICAL
+                  val gl = LinearLayout.LayoutParams(match, wrap)
+                  gl.topMargin = dp(18)
+                  page.addView(homeGrid, gl)
+
+                  page.addView(View(this), LinearLayout.LayoutParams(match, 0, 1f))
+
+                  // الدوك
+                  val dock = LinearLayout(this)
+                  dock.orientation = LinearLayout.HORIZONTAL
+                  dock.gravity = Gravity.CENTER
+                  dock.background = glass(32, 0x18FFFFFF)
+                  dock.addView(dockTile(R.drawable.ic_phone, false) { go(Intent(Intent.ACTION_DIAL)) }, LinearLayout.LayoutParams(0, wrap, 1f))
+                  dock.addView(dockTile(R.drawable.ic_msg, false) {
+                      go(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MESSAGING))
+                  }, LinearLayout.LayoutParams(0, wrap, 1f))
+                  dock.addView(dockTile(R.drawable.ic_camera, false) {
+                      go(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
+                  }, LinearLayout.LayoutParams(0, wrap, 1f))
+                  dock.addView(dockTile(R.drawable.ic_web, false) {
+                      go(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")))
+                  }, LinearLayout.LayoutParams(0, wrap, 1f))
+                  dock.addView(dockTile(R.drawable.ic_apps, true) { openDrawer() }, LinearLayout.LayoutParams(0, wrap, 1f))
+                  page.addView(dock, LinearLayout.LayoutParams(match, dp(76)))
+
+                  buildDrawer()
+
+                  val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+                      override fun onDown(e: MotionEvent): Boolean = true
+                      override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                          if (vy < -1200f && abs(vy) > abs(vx)) {
+                              openDrawer()
+                              return true
+                          }
+                          return false
+                      }
+                  })
+                  root.setOnTouchListener { _, ev ->
+                      gd.onTouchEvent(ev)
+                      true
+                  }
+              }
+
+              private fun dockTile(res: Int, accented: Boolean, onClick: () -> Unit): View {
+                  val box = FrameLayout(this)
+                  val tile = ImageView(this)
+                  tile.setImageResource(res)
+                  tile.setPadding(dp(14), dp(14), dp(14), dp(14))
+                  tile.background = glass(19, 0x1AFFFFFF)
+                  if (accented) tile.setColorFilter(accent)
+                  tile.contentDescription = if (accented) "كل التطبيقات" else "اختصار"
+                  tile.setOnClickListener { onClick() }
+                  val lp = FrameLayout.LayoutParams(dp(54), dp(54))
+                  lp.gravity = Gravity.CENTER
+                  box.addView(tile, lp)
+                  return box
+              }
+
+              private fun buildDrawer() {
+                  drawer = FrameLayout(this)
+                  drawer.setBackgroundColor(0xF20D1015.toInt())
+                  drawer.visibility = View.GONE
+                  drawer.isClickable = true
+
+                  val col = LinearLayout(this)
+                  col.orientation = LinearLayout.VERTICAL
+                  col.setPadding(dp(20), statusBarH() + dp(16), dp(20), navBarH() + dp(8))
+
+                  val title = label("كل التطبيقات", 28f, white, true)
+                  title.setPadding(dp(6), 0, dp(6), 0)
+                  col.addView(title)
+
+                  searchBox = EditText(this)
+                  searchBox.hint = "ابحث عن تطبيق"
+                  searchBox.setHintTextColor(dim)
+                  searchBox.setTextColor(white)
+                  searchBox.textSize = 15f
+                  searchBox.setSingleLine(true)
+                  searchBox.background = glass(26)
+                  searchBox.setPadding(dp(20), 0, dp(20), 0)
+                  searchBox.addTextChangedListener(object : TextWatcher {
+                      override fun afterTextChanged(s: Editable?) {
+                          val q = s?.toString()?.trim()?.lowercase() ?: ""
+                          adapter.items = if (q.isEmpty()) apps else apps.filter { it.label.lowercase().contains(q) }
+                          adapter.notifyDataSetChanged()
+                      }
+                      override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                      override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                  })
+                  val sl = LinearLayout.LayoutParams(match, dp(52))
+                  sl.topMargin = dp(16)
+                  col.addView(searchBox, sl)
+
+                  adapter = AppAdapter()
+                  drawerGrid = GridView(this)
+                  drawerGrid.numColumns = 4
+                  drawerGrid.verticalSpacing = dp(18)
+                  drawerGrid.selector = ColorDrawable(Color.TRANSPARENT)
+                  drawerGrid.adapter = adapter
+                  drawerGrid.setOnItemClickListener { _, _, pos, _ ->
+                      launch(adapter.items[pos])
+                  }
+                  drawerGrid.setOnItemLongClickListener { _, _, pos, _ ->
+                      togglePin(adapter.items[pos])
+                      true
+                  }
+                  val gl = LinearLayout.LayoutParams(match, 0, 1f)
+                  gl.topMargin = dp(20)
+                  col.addView(drawerGrid, gl)
+
+                  drawer.addView(col, FrameLayout.LayoutParams(match, match))
+                  root.addView(drawer, FrameLayout.LayoutParams(match, match))
+              }
+
+              private fun openDrawer() {
+                  if (drawer.visibility == View.VISIBLE) return
+                  drawer.alpha = 0f
+                  drawer.visibility = View.VISIBLE
+                  drawer.animate().alpha(1f).setDuration(180).start()
+              }
+
+              private fun closeDrawer() {
+                  if (drawer.visibility != View.VISIBLE) return
+                  val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+                  imm.hideSoftInputFromWindow(searchBox.windowToken, 0)
+                  searchBox.setText("")
+                  searchBox.clearFocus()
+                  drawer.animate().alpha(0f).setDuration(150).withEndAction {
+                      drawer.visibility = View.GONE
+                  }.start()
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  if (drawer.visibility == View.VISIBLE) closeDrawer()
+              }
+
+              override fun onNewIntent(intent: Intent?) {
+                  super.onNewIntent(intent)
+                  closeDrawer()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  loadApps()
+                  root.removeCallbacks(tick)
+                  root.post(tick)
+                  fetchWeather()
+              }
+
+              override fun onPause() {
+                  root.removeCallbacks(tick)
+                  super.onPause()
+              }
+
+              // ---------- التطبيقات ----------
+
+              private fun loadApps() {
+                  val pm = packageManager
+                  val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                  apps = pm.queryIntentActivities(i, 0)
+                      .map {
+                          AppItem(
+                              it.loadLabel(pm).toString(),
+                              it.activityInfo.packageName,
+                              ComponentName(it.activityInfo.packageName, it.activityInfo.name),
+                              it.loadIcon(pm)
+                          )
+                      }
+                      .filter { it.pkg != packageName }
+                      .sortedBy { it.label.lowercase() }
+                  adapter.items = apps
+                  adapter.notifyDataSetChanged()
+                  refreshHome()
+              }
+
+              private fun pins(): Set<String> {
+                  val sp = getSharedPreferences("launcher", MODE_PRIVATE)
+                  val saved = sp.getStringSet("pins", null)
+                  if (saved != null) return saved
+                  return apps.take(8).map { it.pkg }.toSet()
+              }
+
+              private fun togglePin(a: AppItem) {
+                  val cur = pins().toMutableSet()
+                  if (cur.contains(a.pkg)) {
+                      cur.remove(a.pkg)
+                      Toast.makeText(this, "انشال من الرئيسية", Toast.LENGTH_SHORT).show()
+                  } else {
+                      cur.add(a.pkg)
+                      Toast.makeText(this, "انضاف للرئيسية", Toast.LENGTH_SHORT).show()
+                  }
+                  getSharedPreferences("launcher", MODE_PRIVATE).edit().putStringSet("pins", HashSet(cur)).apply()
+                  refreshHome()
+              }
+
+              private fun refreshHome() {
+                  homeGrid.removeAllViews()
+                  val p = pins()
+                  val pinned = apps.filter { p.contains(it.pkg) }.take(8)
+                  for (row in pinned.chunked(4)) {
+                      val r = LinearLayout(this)
+                      r.orientation = LinearLayout.HORIZONTAL
+                      val rl = LinearLayout.LayoutParams(match, wrap)
+                      rl.bottomMargin = dp(14)
+                      for (a in row) {
+                          val cell = appCell(a)
+                          cell.setOnClickListener { launch(a) }
+                          cell.setOnLongClickListener {
+                              togglePin(a)
+                              true
+                          }
+                          r.addView(cell, LinearLayout.LayoutParams(0, wrap, 1f))
+                      }
+                      for (k in row.size until 4) {
+                          r.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+                      }
+                      homeGrid.addView(r, rl)
+                  }
+              }
+
+              private fun appCell(a: AppItem): LinearLayout {
+                  val cell = LinearLayout(this)
+                  cell.orientation = LinearLayout.VERTICAL
+                  cell.gravity = Gravity.CENTER_HORIZONTAL
+                  val img = ImageView(this)
+                  img.setImageDrawable(a.icon)
+                  img.setPadding(dp(8), dp(8), dp(8), dp(8))
+                  img.background = glass(20)
+                  cell.addView(img, LinearLayout.LayoutParams(dp(60), dp(60)))
+                  val t = label(a.label, 12f, soft)
+                  t.maxLines = 1
+                  t.ellipsize = TextUtils.TruncateAt.END
+                  t.gravity = Gravity.CENTER
+                  val tl = LinearLayout.LayoutParams(match, wrap)
+                  tl.topMargin = dp(6)
+                  cell.addView(t, tl)
+                  return cell
+              }
+
+              private fun launch(a: AppItem) {
+                  val i = Intent(Intent.ACTION_MAIN)
+                      .addCategory(Intent.CATEGORY_LAUNCHER)
+                      .setComponent(a.component)
+                      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                  go(i)
+                  closeDrawer()
+              }
+
+              private fun go(i: Intent) {
+                  try {
+                      startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "ما كدرت أفتح التطبيق", Toast.LENGTH_SHORT).show()
+                  }
+              }
+
+              inner class AppAdapter : BaseAdapter() {
+                  var items: List<AppItem> = emptyList()
+                  override fun getCount(): Int = items.size
+                  override fun getItem(position: Int): Any = items[position]
+                  override fun getItemId(position: Int): Long = position.toLong()
+                  override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+                      val cell = appCell(items[position])
+                      cell.isClickable = false
+                      cell.isFocusable = false
+                      return cell
+                  }
+              }
+
+              // ---------- التاريخ والصلاة والطقس ----------
+
+              private fun updateDates() {
+                  try {
+                      dateView.text = SimpleDateFormat("EEEE، d MMMM", Locale("ar", "IQ")).format(Date())
+                  } catch (e: Exception) {
+                      dateView.text = ""
+                  }
+                  try {
+                      val months = arrayOf(
+                          "محرم", "صفر", "ربيع الأول", "ربيع الآخر", "جمادى الأولى", "جمادى الآخرة",
+                          "رجب", "شعبان", "رمضان", "شوال", "ذو القعدة", "ذو الحجة"
+                      )
+                      val h = HijrahDate.now()
+                      val m = h.get(ChronoField.MONTH_OF_YEAR)
+                      val y = h.get(ChronoField.YEAR)
+                      hijriView.text = "${months[m - 1]} $y هـ"
+                  } catch (e: Exception) {
+                      hijriView.text = ""
+                  }
+              }
+
+              private fun mod(a: Double, b: Double): Double = ((a % b) + b) % b
+
+              // الناصرية، التوقيت الجعفري تقريباً: الفجر 16°، المغرب 4° تحت الأفق
+              // يرجع [الفجر، الشروق، الظهر، المغرب] بالساعات
+              private fun prayerTimes(date: LocalDate): DoubleArray {
+                  val lat = 31.0439
+                  val lon = 46.2573
+                  val tz = 3.0
+                  val jd0 = date.toEpochDay() + 2440587.5
+                  val jd = jd0 + 0.5 - tz / 24.0
+                  val d = jd - 2451545.0
+                  val g = Math.toRadians(mod(357.529 + 0.98560028 * d, 360.0))
+                  val q = mod(280.459 + 0.98564736 * d, 360.0)
+                  val l = Math.toRadians(mod(q + 1.915 * sin(g) + 0.020 * sin(2 * g), 360.0))
+                  val e = Math.toRadians(23.439 - 0.00000036 * d)
+                  val ra = mod(Math.toDegrees(atan2(cos(e) * sin(l), cos(l))) / 15.0, 24.0)
+                  val decl = asin(sin(e) * sin(l))
+                  val eqt = mod(q / 15.0 - ra + 12.0, 24.0) - 12.0
+                  val noon = 12.0 + tz - lon / 15.0 - eqt
+                  val la = Math.toRadians(lat)
+                  fun hourAngle(angle: Double): Double {
+                      val c = (-sin(Math.toRadians(angle)) - sin(la) * sin(decl)) / (cos(la) * cos(decl))
+                      return Math.toDegrees(acos(c)) / 15.0
+                  }
+                  return doubleArrayOf(
+                      noon - hourAngle(16.0),
+                      noon - hourAngle(0.833),
+                      noon,
+                      noon + hourAngle(4.0)
+                  )
+              }
+
+              private fun fmt(h: Double): String {
+                  var hh = floor(h).toInt()
+                  var mm = ((h - hh) * 60).roundToInt()
+                  if (mm == 60) {
+                      hh += 1
+                      mm = 0
+                  }
+                  val suffix = if (hh % 24 < 12) "ص" else "م"
+                  val h12 = if (hh % 12 == 0) 12 else hh % 12
+                  return String.format(Locale.US, "%d:%02d %s", h12, mm, suffix)
+              }
+
+              private fun updatePrayer() {
+                  val now = Calendar.getInstance()
+                  val nowH = now.get(Calendar.HOUR_OF_DAY) + now.get(Calendar.MINUTE) / 60.0
+                  val today = LocalDate.now()
+                  val t = prayerTimes(today)
+                  val names = arrayOf("الفجر", "الظهر", "المغرب")
+                  val times = doubleArrayOf(t[0], t[2], t[3])
+                  val idx = times.indexOfFirst { it > nowH }
+                  val name: String
+                  val h: Double
+                  if (idx >= 0) {
+                      name = names[idx]
+                      h = times[idx]
+                  } else {
+                      name = names[0]
+                      h = prayerTimes(today.plusDays(1))[0]
+                  }
+                  prayerName.text = name
+                  prayerTime.text = fmt(h)
+              }
+
+              private fun wxText(c: Int): String = when (c) {
+                  0 -> "صافي"
+                  1, 2 -> "غائم جزئياً"
+                  3 -> "غائم"
+                  45, 48 -> "ضباب"
+                  in 51..57 -> "رذاذ"
+                  in 61..67 -> "مطر"
+                  in 71..77 -> "ثلج"
+                  in 80..82 -> "زخات مطر"
+                  in 95..99 -> "عاصفة رعدية"
+                  else -> "الناصرية"
+              }
+
+              private fun fetchWeather() {
+                  if (System.currentTimeMillis() - lastWeather < 600000L) return
+                  lastWeather = System.currentTimeMillis()
+                  thread {
+                      try {
+                          val url = URL("https://api.open-meteo.com/v1/forecast?latitude=31.0439&longitude=46.2573&current=temperature_2m,weather_code")
+                          val c = url.openConnection() as HttpURLConnection
+                          c.connectTimeout = 8000
+                          c.readTimeout = 8000
+                          val body = c.inputStream.bufferedReader().readText()
+                          val cur = JSONObject(body).getJSONObject("current")
+                          val temp = cur.getDouble("temperature_2m").roundToInt()
+                          val code = cur.getInt("weather_code")
+                          runOnUiThread {
+                              tempView.text = "$temp°"
+                              condView.text = wxText(code)
+                          }
+                      } catch (e: Exception) {
+                          lastWeather = 0L
+                      }
+                  }
+              }
+          }
+          EOF_2
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_apps.xml' <<'EOF_3'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M4,4h6v6H4zM14,4h6v6h-6zM4,14h6v6H4zM14,14h6v6h-6z"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="1.8" />
+          </vector>
+          EOF_3
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_camera.xml' <<'EOF_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M4,8h3l2,-3h6l2,3h3v11H4zM8.5,13a3.5,3.5 0,1 0,7 0a3.5,3.5 0,1 0,-7 0"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="1.8" />
+          </vector>
+          EOF_4
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_launcher.xml' <<'EOF_5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#0D1015"
+                  android:pathData="M0,0h108v108h-108z" />
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M34,34h16v16h-16zM58,34h16v16h-16zM34,58h16v16h-16zM58,58h16v16h-16z"
+                  android:strokeColor="#FFB547"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="4" />
+          </vector>
+          EOF_5
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_msg.xml' <<'EOF_6'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M4,5h16v11H9l-5,4z"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="1.8" />
+          </vector>
+          EOF_6
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_phone.xml' <<'EOF_7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M5,4h4l2,5 -2.5,1.5a11,11 0,0 0,5 5L15,13l5,2v4a2,2 0,0 1,-2 2A16,16 0,0 1,3 6a2,2 0,0 1,2 -2z"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="1.8" />
+          </vector>
+          EOF_7
+          mkdir -p 'app/src/main/res/drawable'
+          cat > 'app/src/main/res/drawable/ic_web.xml' <<'EOF_8'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="#00000000"
+                  android:pathData="M12,3a9,9 0,1 0,0 18a9,9 0,1 0,0 -18zM3,12h18M12,3c3,3 3,15 0,18M12,3c-3,3 -3,15 0,18"
+                  android:strokeColor="#FFFFFF"
+                  android:strokeLineCap="round"
+                  android:strokeLineJoin="round"
+                  android:strokeWidth="1.8" />
+          </vector>
+          EOF_8
+          mkdir -p 'app/src/main/res/values'
+          cat > 'app/src/main/res/values/themes.xml' <<'EOF_9'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">@android:color/black</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+              </style>
+          </resources>
+          EOF_9
+          cat > 'build.gradle.kts' <<'EOF_10'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF_10
+          cat > 'gradle.properties' <<'EOF_11'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          kotlin.code.style=official
+          EOF_11
+          cat > 'settings.gradle.kts' <<'EOF_12'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "NasiriyahLauncher"
+          include(":app")
+          EOF_12
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk launcher.apk
+          gh release create "v${{ github.run_number }}" launcher.apk --title "Launcher v${{ github.run_number }}" --notes "APK"
