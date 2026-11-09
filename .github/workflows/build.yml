@@ -20,7 +20,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Clean conflicting SDK tools
+      - name: Clean SDK tools
         run: rm -rf /usr/local/lib/android/sdk/cmdline-tools/latest
 
       - name: Set up Android SDK
@@ -33,42 +33,36 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: 1. Create Gradle Configuration Files
+      - name: Generate Project Structure
         run: |
-          mkdir -p app
-          cat > build.gradle.kts <<'EOF'
+          mkdir -p app/src/main/java/com/nasiriyah/launcher app/src/main/res/values app/src/main/res/drawable
+          
+          cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.5.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
           EOF
 
-          cat > settings.gradle.kts <<'EOF'
+          cat << 'EOF' > settings.gradle.kts
           pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
           rootProject.name = "NasiriyahLauncher"
           include(":app")
           EOF
 
-          cat > gradle.properties <<'EOF'
+          cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
           android.useAndroidX=false
           kotlin.code.style=official
           EOF
 
-          cat > app/build.gradle.kts <<'EOF'
+          cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
@@ -83,25 +77,16 @@ jobs:
                   versionCode = 1
                   versionName = "1.0"
               }
-              buildTypes {
-                  release {
-                      isMinifyEnabled = false
-                  }
-              }
+              buildTypes { release { isMinifyEnabled = false } }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
+              kotlinOptions { jvmTarget = "17" }
           }
           EOF
 
-      - name: 2. Create Manifest and Themes
-        run: |
-          mkdir -p app/src/main/res/values app/src/main/res/drawable
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
@@ -121,10 +106,7 @@ jobs:
                       android:name=".MainActivity"
                       android:exported="true"
                       android:launchMode="singleTask"
-                      android:resumeWhilePausing="true"
-                      android:screenOrientation="portrait"
-                      android:stateNotNeeded="true"
-                      android:windowSoftInputMode="adjustPan">
+                      android:screenOrientation="portrait">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.HOME" />
@@ -136,7 +118,7 @@ jobs:
           </manifest>
           EOF
 
-          cat > app/src/main/res/values/themes.xml <<'EOF'
+          cat << 'EOF' > app/src/main/res/values/themes.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
@@ -147,85 +129,23 @@ jobs:
           </resources>
           EOF
 
-      - name: 3. Create Vector Drawables
-        run: |
-          cat > app/src/main/res/drawable/ic_apps.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
+          cat << 'EOF' > app/src/main/res/drawable/ic_launcher.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00000000" android:pathData="M4,4h6v6H4zM14,4h6v6h-6zM4,14h6v6H4zM14,14h6v6h-6z" android:strokeColor="#FFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="1.8" />
-          </vector>
-          EOF
-
-          cat > app/src/main/res/drawable/ic_camera.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00000000" android:pathData="M4,8h3l2,-3h6l2,3h3v11H4zM8.5,13a3.5,3.5 0,1 0,7 0a3.5,3.5 0,1 0,-7 0" android:strokeColor="#FFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="1.8" />
-          </vector>
-          EOF
-
-          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
               <path android:fillColor="#0D1015" android:pathData="M0,0h108v108h-108z" />
-              <path android:fillColor="#00000000" android:pathData="M34,34h16v16h-16zM58,34h16v16h-16zM34,58h16v16h-16zM58,58h16v16h-16z" android:strokeColor="#FFB547" android:strokeLineJoin="round" android:strokeWidth="4" />
           </vector>
           EOF
 
-          cat > app/src/main/res/drawable/ic_msg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00000000" android:pathData="M4,5h16v11H9l-5,4z" android:strokeColor="#FFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="1.8" />
-          </vector>
-          EOF
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
 
-          cat > app/src/main/res/drawable/ic_phone.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00000000" android:pathData="M5,4h4l2,5 -2.5,1.5a11,11 0,0 0,5 5L15,13l5,2v4a2,2 0,0 1,-2 2A16,16 0,0 1,3 6a2,2 0,0 1,2 -2z" android:strokeColor="#FFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="1.8" />
-          </vector>
-          EOF
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
-          cat > app/src/main/res/drawable/ic_web.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-              <path android:fillColor="#00000000" android:pathData="M12,3a9,9 0,1 0,0 18a9,9 0,1 0,0 -18zM3,12h18M12,3c3,3 3,15 0,18M12,3c-3,3 -3,15 0,18" android:strokeColor="#FFFFFF" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeWidth="1.8" />
-          </vector>
-          EOF
-
-      - name: 4. Create MainActivity.kt
-        run: |
-          mkdir -p app/src/main/java/com/nasiriyah/launcher
-          cat > app/src/main/java/com/nasiriyah/launcher/MainActivity.kt <<'EOF'
-          package com.nasiriyah.launcher
-          import android.app.Activity
-          import android.content.ComponentName
-          import android.content.Intent
-          import android.graphics.Color
-          import android.graphics.Typeface
-          import android.graphics.drawable.ColorDrawable
-          import android.graphics.drawable.Drawable
-          import android.graphics.drawable.GradientDrawable
-          import android.graphics.drawable.LayerDrawable
-          import android.net.Uri
-          import android.os.Bundle
-          import android.provider.MediaStore
-          import android.text.Editable
-          import android.text.TextUtils
-          import android.text.TextWatcher
-          import android.view.Gravity
-          import android.view.GestureDetector
-          import android.view.MotionEvent
-          import android.view.View
-          import android.view.ViewGroup
-          import android.view.inputmethod.InputMethodManager
-          import android.widget.BaseAdapter
-          import android.widget.EditText
           import android.widget.FrameLayout
           import android.widget.GridView
           import android.widget.ImageView
