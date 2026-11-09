@@ -1,4 +1,4 @@
-.name: Build Launcher APK
+name: Build Launcher APK
 on:
   push:
     branches: [main, master]
